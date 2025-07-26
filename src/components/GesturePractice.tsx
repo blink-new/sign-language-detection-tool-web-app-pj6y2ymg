@@ -16,6 +16,7 @@ interface GesturePracticeProps {
 
 export default function GesturePractice({ gesture, user, onBack, onComplete }: GesturePracticeProps) {
   const [cameraActive, setCameraActive] = useState(false)
+  const [cameraLoading, setCameraLoading] = useState(false)
   const [isDetecting, setIsDetecting] = useState(false)
   const [detectionProgress, setDetectionProgress] = useState(0)
   const [currentStep, setCurrentStep] = useState(0)
@@ -35,29 +36,82 @@ export default function GesturePractice({ gesture, user, onBack, onComplete }: G
     }
   }, [])
 
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 }
-      })
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        streamRef.current = stream
-        setCameraActive(true)
-      }
-    } catch (error) {
-      console.error('Error accessing camera:', error)
-      alert('Unable to access camera. Please ensure you have granted camera permissions.')
-    }
-  }
-
   const stopCamera = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
       streamRef.current = null
     }
     setCameraActive(false)
+    setCameraLoading(false)
+  }
+
+  const startCamera = async () => {
+    setCameraLoading(true)
+    try {
+      // Check if getUserMedia is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera access is not supported in this browser')
+      }
+
+      // Check for HTTPS requirement
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        throw new Error('Camera access requires HTTPS connection')
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { 
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: 'user'
+        }
+      })
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        streamRef.current = stream
+        
+        // Wait for video to load before setting camera as active
+        videoRef.current.onloadedmetadata = () => {
+          console.log('Camera loaded successfully')
+          setCameraActive(true)
+          setCameraLoading(false)
+        }
+        
+        // Handle video errors
+        videoRef.current.onerror = (error) => {
+          console.error('Video error:', error)
+          stopCamera()
+        }
+        
+        // Also handle the case where metadata doesn't load
+        setTimeout(() => {
+          if (cameraLoading && streamRef.current) {
+            console.log('Camera timeout - setting active anyway')
+            setCameraActive(true)
+            setCameraLoading(false)
+          }
+        }, 5000)
+      }
+    } catch (error: any) {
+      console.error('Error accessing camera:', error)
+      setCameraLoading(false)
+      
+      let errorMessage = 'Unable to access camera. '
+      
+      if (error.name === 'NotAllowedError') {
+        errorMessage += 'Please allow camera permissions and try again. You may need to click the camera icon in your browser\'s address bar.'
+      } else if (error.name === 'NotFoundError') {
+        errorMessage += 'No camera found on this device.'
+      } else if (error.name === 'NotSupportedError') {
+        errorMessage += 'Camera is not supported in this browser.'
+      } else if (error.message.includes('HTTPS')) {
+        errorMessage += 'Camera access requires a secure connection (HTTPS).'
+      } else {
+        errorMessage += 'Please check your camera settings and try again.'
+      }
+      
+      alert(errorMessage)
+    }
   }
 
   const startDetection = () => {
@@ -285,7 +339,7 @@ export default function GesturePractice({ gesture, user, onBack, onComplete }: G
                       />
                       <canvas
                         ref={canvasRef}
-                        className="absolute inset-0 w-full h-full"
+                        className="absolute inset-0 w-full h-full pointer-events-none"
                       />
                       {isDetecting && (
                         <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
@@ -298,11 +352,22 @@ export default function GesturePractice({ gesture, user, onBack, onComplete }: G
                         </div>
                       )}
                     </>
+                  ) : cameraLoading ? (
+                    <div className="w-full h-80 flex items-center justify-center text-white">
+                      <div className="text-center">
+                        <div className="animate-pulse mb-4">
+                          <div className="w-16 h-16 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>
+                        </div>
+                        <p className="text-lg font-semibold">Starting camera...</p>
+                        <p className="text-sm text-gray-300 mt-2">Please allow camera access if prompted</p>
+                      </div>
+                    </div>
                   ) : (
                     <div className="w-full h-80 flex items-center justify-center text-gray-400">
                       <div className="text-center">
                         <CameraOff className="h-16 w-16 mx-auto mb-4" />
-                        <p>Camera not active</p>
+                        <p className="text-lg font-semibold">Camera not active</p>
+                        <p className="text-sm text-gray-500 mt-2">Click "Start Camera" to begin practice</p>
                       </div>
                     </div>
                   )}
@@ -311,10 +376,15 @@ export default function GesturePractice({ gesture, user, onBack, onComplete }: G
                 <div className="space-y-4">
                   {/* Camera Controls */}
                   <div className="flex gap-2">
-                    {!cameraActive ? (
+                    {!cameraActive && !cameraLoading ? (
                       <Button onClick={startCamera} className="flex-1">
                         <Camera className="h-4 w-4 mr-2" />
                         Start Camera
+                      </Button>
+                    ) : cameraLoading ? (
+                      <Button disabled className="flex-1">
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                        Starting Camera...
                       </Button>
                     ) : (
                       <Button onClick={stopCamera} variant="outline" className="flex-1">
